@@ -1,0 +1,394 @@
+---
+title: "NYDP Shooting Incident Project"
+date: "2023-11-21"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction
+
+This is a data analysis project about shooting incidents in New York City. I would like to study about the race, sex and age group of the victims and perpetrators of the shooting incidents to see if there is any demographic group is involved in the incidents more than other group statistically. Also there are 5 major boroughs in New York City with different population. I am also interest in how the populaion will affect the total shooting incidents and the one with murder cases. Therefore in the end of this analysis, I will create a model to predict the total murder case per thousand population by the total incidents per thousand population of each Borough
+
+## Step 0 - Load the Library
+
+
+```{r install_tinyverse package}
+# load the tidyverse library
+library(tidyverse)
+# load the lubridate library
+library(lubridate)
+```
+
+## Step 1 - Indetify and import the data
+
+Start by reading in the data from the url.
+```{r import_data}
+## Get current Data in the csv file.
+file_url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv"
+NYDP_shooting <- read_csv(file_url)
+```
+
+After looking at the NYDP shooting data, I would like to tidy those dataset. I don't need the INCIDENT_KEY,LOC_OF_OCCUR_DESC, PRECINCT, JURISDICTION_CODE, LOC_CLASSFCTN_DESC, LOCATION_DESC, X_COORD_CD, Y_COORD_CD, Latitude, Longitude and Lon_Lat columns for the analysis I am planning, so I will get rid of those.
+
+```{r unselect_unwanted_columns}
+NYDP_shooting <- NYDP_shooting %>% 
+  select(-c(INCIDENT_KEY,LOC_OF_OCCUR_DESC, PRECINCT, JURISDICTION_CODE, LOC_CLASSFCTN_DESC, LOCATION_DESC, X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat)) 
+
+NYDP_shooting <- NYDP_shooting %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+```
+
+As each row is record as a new case, I will add a column and fill with 1 to represent the new case of each row. Then I group the data by borough and get the cumulative sum of incidents.
+
+```{r add_NEW_INCIDENTS_column}
+NYDP_shooting$NEW_INCIDENTS <- 1
+
+NYDP_shooting_totals_by_DATE <- NYDP_shooting %>%
+  arrange(OCCUR_DATE) %>%
+  group_by(OCCUR_DATE, BORO, STATISTICAL_MURDER_FLAG, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE)
+  
+```
+
+## Step 2 - Visualize and analyze the data
+
+First, let see which borough occurred the most incidents.
+
+```{r NYDP_shooting_by_BORO}
+ggplot(NYDP_shooting, aes(x = BORO, fill = BORO)) +
+  geom_bar() +
+  labs(title = "Number of Incidents in Each Borough", x = "Borough", y = "Count")
+```
+
+Group the data by Borough and sum the cases to get the total number of cases.
+```{r NYDP_shooting_totals_by_BORO}
+NYDP_shooting_totals_by_BORO <- NYDP_shooting_totals_by_DATE %>%
+  group_by(BORO) %>% mutate(TOTAL_INCIDENTS = cumsum(NEW_INCIDENTS)) %>%
+  select(BORO, TOTAL_INCIDENTS, OCCUR_DATE)
+
+  ggplot(NYDP_shooting_totals_by_BORO, aes(x = OCCUR_DATE, y =TOTAL_INCIDENTS,  color = BORO)) +
+  geom_line() +
+  labs(title = "Total Incidents by Borough Over Time", x = "Year", y = "count") +
+  scale_fill_discrete(name = "Borough")
+```
+
+Then let see in which month of the year occurred the most incidents.
+```{r visualize_US_data_3}
+NYDP_shooting <- NYDP_shooting %>%
+  mutate(OCCUR_MONTH = lubridate::month(OCCUR_DATE))
+NYDP_shooting <- NYDP_shooting %>%
+  mutate(OCCUR_YEAR = lubridate::year(OCCUR_DATE))
+
+ggplot(NYDP_shooting, aes(x = OCCUR_MONTH)) +
+  geom_line(stat = "count", color="RED") +
+  scale_x_discrete(limits = 1:12, labels = month.abb)+
+  labs(title = "Number of Incidents by Month", x = "MONTH", y = "Count") +
+  scale_fill_discrete(name = "MONTH")
+```
+
+We can see that during summer there are more incidents occur.
+
+And I want to see in which time of the day occurred the most incidents as well.
+```{r visualize_US_data_time}
+NYDP_shooting <- NYDP_shooting %>%
+  mutate(OCCUR_HOUR = lubridate::hour(OCCUR_TIME))
+
+ggplot(NYDP_shooting, aes(x = OCCUR_TIME)) +
+  geom_line(stat = "count", color="RED") +
+  scale_x_time() +
+  labs(title = "Number of Incidents by Time of a Day", x = "Hour", y = "Count") +
+  scale_fill_discrete(name = "MONTH")
+```
+
+We can see that during night time and midnight there are more incidents occur.
+
+There are two type of incidents: Murder cases or injury cases.
+```{r visualize_US_data_4}
+ggplot(NYDP_shooting, aes(x = STATISTICAL_MURDER_FLAG, fill = STATISTICAL_MURDER_FLAG)) +
+  geom_bar(stat = "count") +
+  labs(title = "Number of Incidents that involved murder flag", x = "Murder Flag", y = "Count") +
+  scale_fill_discrete(name = "Murder Flag")
+```
+
+```{r seperate_two_data_set}
+NYDP_shooting_murder <- NYDP_shooting %>%
+  filter(STATISTICAL_MURDER_FLAG=="TRUE")
+
+NYDP_shooting_nonmurder <- NYDP_shooting %>%
+  filter(STATISTICAL_MURDER_FLAG=="FALSE")
+```
+
+See the perpetrator's age group of murder cases.
+```{r perp_age_group_of_murder_cases}
+NYDP_shooting_murder_age <- NYDP_shooting_murder %>% 
+	group_by(PERP_AGE_GROUP) %>% 
+	summarize(incidents_by_age = sum(NEW_INCIDENTS))
+
+NYDP_shooting_murder_age %>% 
+  filter(incidents_by_age > 1)
+ 
+	ggplot(NYDP_shooting_murder_age, aes(x = PERP_AGE_GROUP, y = incidents_by_age, fill = PERP_AGE_GROUP)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Age Group of Murder Cases Perpetrator", x = "Age Group", y = "Count") +
+  scale_fill_discrete(name = "Age Group")
+```
+
+See the perpetrator's age group of non-murder cases.
+```{r perp_age_group_of_nonmurder_cases}
+NYDP_shooting_nonmurder_age <- NYDP_shooting_nonmurder %>% 
+	group_by(PERP_AGE_GROUP) %>% 
+	summarize(incidents_by_age = sum(NEW_INCIDENTS))
+
+NYDP_shooting_nonmurder_age <- NYDP_shooting_nonmurder_age %>% 
+  filter(incidents_by_age > 1)
+ 
+	ggplot(NYDP_shooting_nonmurder_age, aes(x = PERP_AGE_GROUP, y = incidents_by_age, fill = PERP_AGE_GROUP)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Age Group of Non-Murder Cases Perpetrator", x = "Age Group", y = "Count") +
+  scale_fill_discrete(name = "Age Group")
+```
+
+See the sex of murder cases perpetrator.
+```{r perp_sex_of_murder_cases}
+NYDP_shooting_murder_sex <- NYDP_shooting_murder %>% 
+	group_by(PERP_SEX) %>% 
+	summarize(incidents_by_sex = sum(NEW_INCIDENTS))
+
+NYDP_shooting_murder_sex %>% 
+  filter(incidents_by_sex > 1)
+ 
+	ggplot(NYDP_shooting_murder_sex, aes(x = PERP_SEX, y = incidents_by_sex, fill = PERP_SEX)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Sex of Murder Cases Perpetrator", x = "Sex", y = "Count") +
+  scale_fill_discrete(name = "Sex")
+```
+
+See the sex of non-murder cases perpetrator.
+```{r perp_sex_of_nonmurder_cases}
+NYDP_shooting_nonmurder_sex <- NYDP_shooting_nonmurder %>% 
+	group_by(PERP_SEX) %>% 
+	summarize(incidents_by_sex = sum(NEW_INCIDENTS))
+
+NYDP_shooting_nonmurder_sex <- NYDP_shooting_nonmurder_sex %>% 
+  filter(incidents_by_sex > 1)
+ 
+	ggplot(NYDP_shooting_nonmurder_sex, aes(x = PERP_SEX, y = incidents_by_sex, fill = PERP_SEX)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Sex of Non-Murder Cases Perpetrator", x = "Sex", y = "Count") +
+  scale_fill_discrete(name = "Sex")
+```
+
+See the race of murder cases perpetrator.
+```{r perp_race_of_murder_cases}
+NYDP_shooting_murder_race <- NYDP_shooting_murder %>% 
+	group_by(PERP_RACE) %>% 
+	summarize(incidents_by_race = sum(NEW_INCIDENTS))
+
+NYDP_shooting_murder_race %>% 
+  filter(incidents_by_race > 1)
+ 
+	ggplot(NYDP_shooting_murder_race, aes(x = PERP_RACE, y = incidents_by_race, fill = PERP_RACE)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Race of Murder Cases Perpetrator", x = "Race", y = "Count") +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+	scale_fill_discrete(name = "Race")
+```
+
+See the race of non-murder cases perpetrator.
+```{r perp_race_of_nonmurder_cases}
+NYDP_shooting_nonmurder_race <- NYDP_shooting_nonmurder %>% 
+	group_by(PERP_RACE) %>% 
+	summarize(incidents_by_race = sum(NEW_INCIDENTS))
+
+NYDP_shooting_nonmurder_race <- NYDP_shooting_nonmurder_race %>% 
+  filter(incidents_by_race > 1)
+ 
+	ggplot(NYDP_shooting_nonmurder_race, aes(x = PERP_RACE, y = incidents_by_race, fill = PERP_RACE)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Race of Non-Murder Cases Perpetrator", x = "Race", y = "Count") +
+	scale_x_discrete(guide = guide_axis(angle = 90)) +
+  scale_fill_discrete(name = "Race")
+```
+
+We will conduct the same analysis for victim data.
+
+See the victim's age group of murder cases.
+```{r vic_age_group_of_murder_cases}
+NYDP_shooting_vic_murder_age <- NYDP_shooting_murder %>% 
+	group_by(VIC_AGE_GROUP) %>% 
+	summarize(incidents_by_age = sum(NEW_INCIDENTS))
+
+NYDP_shooting_vic_murder_age <- NYDP_shooting_vic_murder_age %>% 
+  filter(incidents_by_age > 1)
+ 
+	ggplot(NYDP_shooting_vic_murder_age, aes(x = VIC_AGE_GROUP, y = incidents_by_age, fill = VIC_AGE_GROUP)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Age Group of Murder Cases Victim", x = "Age Group", y = "Count") +
+  scale_fill_discrete(name = "Age Group")
+```
+
+See the perpetrator's age group of non-murder cases.
+```{r vic_age_group_of_nonmurder_cases}
+NYDP_shooting_vic_nonmurder_age <- NYDP_shooting_nonmurder %>% 
+	group_by(VIC_AGE_GROUP) %>% 
+	summarize(incidents_by_age = sum(NEW_INCIDENTS))
+
+NYDP_shooting_vic_nonmurder_age <- NYDP_shooting_vic_nonmurder_age %>% 
+  filter(incidents_by_age > 1)
+ 
+	ggplot(NYDP_shooting_vic_nonmurder_age, aes(x = VIC_AGE_GROUP, y = incidents_by_age, fill = VIC_AGE_GROUP)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Age Group of Non-Murder Cases Victim", x = "Age Group", y = "Count") +
+  scale_fill_discrete(name = "Age Group")
+```
+
+See the sex of murder cases victim.
+```{r vic_sex_of_murder_cases}
+NYDP_shooting_vic_murder_sex <- NYDP_shooting_murder %>% 
+	group_by(VIC_SEX) %>% 
+	summarize(incidents_by_sex = sum(NEW_INCIDENTS))
+
+NYDP_shooting_vic_murder_sex <- NYDP_shooting_vic_murder_sex%>% 
+  filter(incidents_by_sex > 1)
+ 
+	ggplot(NYDP_shooting_vic_murder_sex, aes(x = VIC_SEX, y = incidents_by_sex, fill = VIC_SEX)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Sex of Murder Cases victim", x = "Sex", y = "Count") +
+  scale_fill_discrete(name = "Sex")
+```
+
+See the sex of non-murder cases victim.
+```{r VIC_sex_of_nonmurder_cases}
+NYDP_shooting_vic_nonmurder_sex <- NYDP_shooting_nonmurder %>% 
+	group_by(VIC_SEX) %>% 
+	summarize(incidents_by_sex = sum(NEW_INCIDENTS))
+
+NYDP_shooting_vic_nonmurder_sex <- NYDP_shooting_vic_nonmurder_sex %>% 
+  filter(incidents_by_sex > 1)
+ 
+	ggplot(NYDP_shooting_vic_nonmurder_sex, aes(x = VIC_SEX, y = incidents_by_sex, fill = VIC_SEX)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Sex of Non-Murder Cases victim", x = "Sex", y = "Count") +
+  scale_fill_discrete(name = "Sex")
+```
+
+See the race of murder cases victim.
+```{r VIC_race_of_murder_cases}
+NYDP_shooting_vic_murder_race <- NYDP_shooting_murder %>% 
+	group_by(VIC_RACE) %>% 
+	summarize(incidents_by_race = sum(NEW_INCIDENTS))
+
+NYDP_shooting_vic_murder_race <- NYDP_shooting_vic_murder_race %>% 
+  filter(incidents_by_race > 1)
+ 
+ggplot(NYDP_shooting_vic_murder_race, aes(x = VIC_RACE, y = incidents_by_race, fill = VIC_RACE)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Race of Murder Cases Victim", x = "Race", y = "Count") +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+	scale_fill_discrete(name = "Race")
+```
+
+See the race of non-murder cases victim.
+```{r VIC_race_of_nonmurder_cases}
+NYDP_shooting_vic_nonmurder_race <- NYDP_shooting_nonmurder %>% 
+	group_by(VIC_RACE) %>% 
+	summarize(incidents_by_race = sum(NEW_INCIDENTS))
+
+NYDP_shooting_vic_nonmurder_race <- NYDP_shooting_vic_nonmurder_race %>% 
+  filter(incidents_by_race > 1)
+ 
+	ggplot(NYDP_shooting_vic_nonmurder_race, aes(x = VIC_RACE, y = incidents_by_race, fill = VIC_RACE)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Race of Non-Murder Cases Victim", x = "Race", y = "Count") +
+	scale_x_discrete(guide = guide_axis(angle = 90)) +
+  scale_fill_discrete(name = "Race")
+```
+
+## Step 3 - Model the data
+
+I want to create a model to predict the total murder case per thousand population by the total incidents per thousand population of each Borough.
+
+First, group the data by Borough and sum the cases to get the total number of cases and total murders.
+```{r NYDP_shooting_totals_by_murder_2}
+NYDP_shooting_totals_by_case <- NYDP_shooting %>%
+  group_by(STATISTICAL_MURDER_FLAG, BORO) %>% 
+  summarize(TOTAL_INCIDENTS = sum(NEW_INCIDENTS)) %>%
+  select (STATISTICAL_MURDER_FLAG, BORO, TOTAL_INCIDENTS)
+
+NYDP_shooting_totals_by_murder <- NYDP_shooting_totals_by_case %>%
+  filter(STATISTICAL_MURDER_FLAG == "TRUE") %>%
+  group_by(BORO) %>% 
+  summarise(TOTAL_MURDER = sum(TOTAL_INCIDENTS))
+
+NYDP_shooting_totals_by_all_case <- NYDP_shooting_totals_by_case %>%
+  group_by(BORO) %>% 
+  summarise(TOTAL_INCIDENTS_ALL_CASE = sum(TOTAL_INCIDENTS))
+
+NYDP_shooting_totals_by_all_case <- NYDP_shooting_totals_by_all_case %>%
+    left_join(NYDP_shooting_totals_by_murder, by = c("BORO"))
+```
+
+Read population by borough data.
+```{r read_population}
+NYC_population_file_url <- "https://data.cityofnewyork.us/api/views/xywu-7bv9/rows.csv"
+NYC_population <- read_csv(NYC_population_file_url)
+NYC_population <- NYC_population %>%
+  select (Borough, `2020`) 
+NYC_population$Borough <- toupper(NYC_population$Borough)
+names(NYC_population)[names(NYC_population) == "Borough"] <- "BORO"
+names(NYC_population)[names(NYC_population) == "2020"] <- "Population"
+```
+
+Join the popution data and shooting data together.
+```{r join_popution_shooting_data}
+NYDP_shooting_totals_by_all_case <- NYDP_shooting_totals_by_all_case %>%
+  left_join(NYC_population, by = c("BORO"))
+```
+
+Calculate the incidents_per_thou and murder_per_thou.
+```{r calc_incidents_per_thou_murder_per_thou}
+NYDP_shooting_totals_by_all_case <- NYDP_shooting_totals_by_all_case %>%
+  mutate(incidents_per_thou = 1000* TOTAL_INCIDENTS_ALL_CASE / Population) %>%
+  mutate(murder_per_thou = 1000* TOTAL_MURDER / Population)
+
+NYDP_shooting_totals_by_all_case
+
+```
+
+```{r linear_model}
+mod <- lm(murder_per_thou ~ incidents_per_thou, data = NYDP_shooting_totals_by_all_case)
+summary(mod)
+```
+
+```{r create_prediction_model}
+NYDP_shooting_totals_by_all_case %>% 
+  mutate(pred = predict(mod))
+```
+
+```{r create_new_dataset_with_prediction}
+NYDP_shooting_totals_by_all_case_w_pred <- NYDP_shooting_totals_by_all_case %>% mutate(pred = predict(mod))
+NYDP_shooting_totals_by_all_case_w_pred
+```
+
+Plot the actuals and the predictions
+```{r plot_actuals_and_prediction}
+NYDP_shooting_totals_by_all_case_w_pred %>% ggplot() +
+  geom_point(aes(x = incidents_per_thou, y = murder_per_thou), color = "blue") +
+  geom_point(aes(x = incidents_per_thou, y = pred), color = "red")
+``` 
+
+## Step 4 - Conclusion and Bias
+
+Conclusion:
+From the analysis, it shows that young black males between ages 18-44 involved in incidents more than the other demography groups. And most incidents occurred in Brooklyn. The increase rate of total incidents of Brooklyn is also faster than the other boroughs within New York City. Most incidents took place in summer (Jun - Aug) in the year and midnight in the day. Around 19.28% of the total incidents were murders, and with the model we can predict the total murder case per thousand population by the total incidents per thousand population of each Borough as these two variables has liner relationship.
+
+Bias:
+
+- The data set contained a lot of missing values such as the incidents that could not find the perpetrator. However those missing value mostly involved classes and characters but not numbers, which make the analysis processing more challenging. The way how we deal with the missing values will cause bias, some may choose to remove all rows with missing values, some may choose to fill with the value that shown most frequented in the dataset. I was not replacing any missing values but I also put it on my graph to show the fact that a lot of details of shooting incidents are unknown to us.
+
+- During the analysis and visualization part, I analysis the race, sex and age group of both perpetrators and victims by the incidents type (murder vs non-murder). It showed that young black males involved in incidents more than the other demography groups. However, the dataset is missing the demography data of the total population in that location. If young black males are a large group in terms of population, it is fair the total incidents related with them is more than other group. But yet we don't have any data to prove it. Therefore saying "young black males involved in incidents more than the other demography groups" with only this data set is biased.
+
+- The model I created is to predict the total murder case per thousand population by the total incidents per thousand population of each Borough. However the model only trained with two variable and 5 boroughs within New York City, which may not enough to reflect the truth. The plot created based on the actuals and the predictions looks great in terms of the difference between them are small, but with only 5 boroughs, the plot itself looks spread out. Also, the model was built with the data recorded in New York City, it will cause lot of bias if we use this model to predict data with locations outside New York.

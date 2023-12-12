@@ -1,0 +1,256 @@
+---
+title: "Covid 19 Project"
+author: "Yuen Yiu Fung"
+date: "2023-11-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 0 - Load the Library
+
+
+```{r install_tinyverse package}
+# load the tidyverse library
+library(tidyverse)
+# load the lubridate library
+library(lubridate)
+```
+## Step 1 - Indetify and import the data
+
+Start by reading in the data from the four main csv files.
+
+```{r get_jhu_data}
+## Get current Data in the four files
+# they all begin the same way
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_global.csv","time_series_covid19_deaths_global.csv", "time_series_covid19_confirmed_US.csv",  "time_series_covid19_deaths_US.csv" )
+urls <- str_c(url_in,file_names)
+```
+
+Let's read in the data and see what we have.
+
+```{r import_data, message=FALSE}
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+After looking at the global_cases and global_deaths, I would like to tidy those datasets and put each variable (date, cases, deaths) in their own column.
+
+Also, I don't need  Lat and Long_ column for the analysis I am planning, so I will get rid of those. Then I will rename the column to be more R friendly and get it ready to be combined.
+
+```{r tidy_global_cases_data}
+global_cases <- global_cases %>% 
+  pivot_longer(cols = -c(`Province/State`, `Country/Region`, Lat, Long), names_to = "date", values_to = "cases") %>%
+  select(-c(Lat,Long))
+summary(global_cases)
+```
+
+```{r tidy_global_deaths_data}
+global_deaths <- global_deaths %>% 
+  pivot_longer(cols = -c(`Province/State`, `Country/Region`,Lat,Long), names_to = "date", values_to = "deaths") %>%
+  select(-c(Lat,Long))
+summary(global_deaths)
+```
+
+Join the global_cases and global_deaths data together.
+
+```{r join_global_cases_global_deaths_data}
+global <- global_cases %>% 
+  full_join(global_deaths) %>%
+  rename(Country_Region = `Country/Region`, Province_State=`Province/State`) %>%
+  mutate(date = mdy(date))
+```
+
+Check the joint data with summary().
+
+```{r summary_global_data}
+global
+summary(global)
+```
+
+From the summary of data, I noticed the there is a lot of rows with 0 cases, I will filter it out in the next step.
+
+```{r filter_global_data}
+global <- global %>% filter(cases > 0)
+summary(global)
+```
+
+After looking at the US_cases and US_deaths, I would like to tidy those datasets and put each variable (date, cases, deaths) in their own column.
+
+Also, I don't need UID, iso2, iso3, code3, FIPS, Lat and Long_ for the analysis I am planning, so I will get rid of those. Then I will change the date column from chr object to date object.
+
+```{r tidy_US_cases_data}
+US_cases <- US_cases %>%
+  pivot_longer(cols = -c(UID:Combined_Key), names_to = "date", values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat,Long_))
+summary(US_cases)
+```
+
+```{r tidy_US_deaths_data}
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -c(UID:Population), names_to = "date", values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat,Long_))
+summary(US_deaths)
+```
+
+Join the US_cases and US_deaths data together
+
+```{r join_US_cases_US_deaths_data}
+US <- US_cases %>% 
+  full_join(US_deaths)
+```
+
+Check the joint data with summary().
+
+```{r summary_US_data}
+US
+summary(US)
+```
+
+From the summary of data, I noticed the there is a lot of rows with 0 cases, I will filter it out in the next step.
+
+```{r filter_US_data}
+US <- US %>% filter(cases > 0)
+summary(US)
+```
+
+Add CombinedKey column to global data
+```{r Create_combinedkey}
+global <- global %>% 
+  unite("Combined_Key", c(Province_State, Country_Region), sep = ", ", na.rm = TRUE, remove = FALSE)
+```
+
+Read Population data
+```{r read_population_data}
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+uid
+```
+
+Join global data with population data
+```{r join_global_data_with_population_data}
+global <- global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(-c(UID, FIPS)) %>%
+  select(Province_State, Country_Region, date, cases, deaths, Population, Combined_Key)
+global
+```
+
+## Step 2 - Visualize and analyze the data
+
+Group the US data by state
+```{r group_US_data}
+US_by_state <- US %>%
+    group_by(Province_State, Country_Region, date) %>%
+    summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>%
+    mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+    select (Province_State, Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+    ungroup()
+
+US_totals <- US_by_state %>%
+    group_by(Country_Region, date) %>%
+    summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>%
+    mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+    select (Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+    ungroup()
+```
+
+Visualize the US total data.
+```{r visualize_US_data}
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+```
+
+Analyse the US data by adding new column of new cases and new deaths number.
+```{r add_new_cases_deaths_columns_to_US_data}
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+US_totals <- US_totals %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+```
+
+Visualize the US total data with new columns.
+```{r visualize_US_data_with_new_cases_deaths_columns}
+US_totals %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+```
+
+Group the data by state.
+```{r summarise_US_state_totals_data}
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarise(deaths = max(deaths), cases = max(cases),
+            population = max(Population),
+            cases_per_thou = 1000* cases / population,
+            deaths_per_thou = 1000* deaths / population) %>%
+  filter(cases > 0, population > 0)
+```
+
+See what are the least worst states in terms of deaths per thou.
+```{r slicemin_US_state_totals_data}
+US_state_totals %>%
+  slice_min(deaths_per_thou, n = 10)
+```
+
+See what are the worst state in terms of deaths per thou.
+```{r slicemax_US_state_totals_data}
+US_state_totals %>%
+  slice_max(deaths_per_thou, n = 10)
+```
+
+## Step 3 - Model the data
+
+```{r linear_model}
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = US_state_totals)
+summary(mod)
+```
+
+```{r create_prediction_model}
+x_grid <- seq(1, 151)
+new_df <- tibble(cases_per_thou = x_grid)
+US_state_totals %>% 
+  mutate(pred = predict(mod))
+```
+
+```{r create_new_dataset_with_prediction}
+US_tot_w_pred <- US_state_totals %>% mutate(pred = predict(mod))
+US_tot_w_pred
+```
+
+Plot the actuals and the predictions
+```{r plot_actuals_and_prediction}
+US_tot_w_pred %>% ggplot() +
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = "blue") +
+  geom_point(aes(x = cases_per_thou, y = pred), color = "red")
+```
+
+## Step 4 - Bias Identification
+There are some bias areas on this analysis project. Especially we were not sure how the number of cases and deaths being recorded. 
